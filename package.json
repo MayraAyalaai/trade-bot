@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "backtest": "node backtest.js",
+    "backtest:optimize": "node backtest.js optimize"
   },
   "keywords": ["crypto", "trading", "bot", "binance", "cryptocurrency"],
   "author": "MayraAyalaai",

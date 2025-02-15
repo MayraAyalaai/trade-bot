@@ -4,6 +4,7 @@ const MovingAverageStrategy = require('./src/strategies/movingAverage');
 const Logger = require('./src/utils/logger');
 const Config = require('./src/config/config');
 const ErrorHandler = require('./src/utils/errorHandler');
+const PerformanceAnalyzer = require('./src/analytics/performanceAnalyzer');
 
 // Load environment variables
 dotenv.config();
@@ -38,21 +39,14 @@ class TradingBot {
             strategyConfig.parameters.longPeriod
         );
         
+        // Analytics
+        this.performanceAnalyzer = new PerformanceAnalyzer();
+        
         // Trading state
         this.position = null; // null, 'LONG', 'SHORT'
         this.entryPrice = 0;
         this.dailyPnL = 0;
         this.lastResetDate = new Date().toDateString();
-        
-        // Performance tracking
-        this.stats = {
-            totalTrades: 0,
-            winningTrades: 0,
-            losingTrades: 0,
-            totalPnL: 0,
-            maxDrawdown: 0,
-            startTime: new Date()
-        };
     }
 
     async start() {
@@ -175,11 +169,19 @@ class TradingBot {
         this.position = 'LONG';
         this.entryPrice = price;
         
-        this.logger.trade('BUY', {
-            symbol: this.config.symbol,
+        const tradingConfig = this.config.getTradingConfig();
+        const trade = {
+            symbol: tradingConfig.symbol,
             price: price,
-            amount: this.config.tradeAmount,
+            amount: tradingConfig.tradeAmount,
             reason: 'Moving Average Signal'
+        };
+        
+        this.logger.trade('BUY', trade);
+        this.performanceAnalyzer.addTrade({
+            action: 'BUY',
+            ...trade,
+            timestamp: Date.now()
         });
         
         this.logger.info(`Entered LONG position at $${price}`);
@@ -189,15 +191,26 @@ class TradingBot {
         if (!this.position) return;
         
         const pnl = ((price - this.entryPrice) / this.entryPrice) * 100;
+        const tradingConfig = this.config.getTradingConfig();
         
-        this.logger.trade('SELL', {
-            symbol: this.config.symbol,
+        const trade = {
+            symbol: tradingConfig.symbol,
             price: price,
-            amount: this.config.tradeAmount,
+            amount: tradingConfig.tradeAmount,
             entryPrice: this.entryPrice,
             pnl: pnl.toFixed(2) + '%',
             reason: reason
+        };
+        
+        this.logger.trade('SELL', trade);
+        this.performanceAnalyzer.addTrade({
+            action: 'SELL',
+            ...trade,
+            timestamp: Date.now()
         });
+        
+        // Update daily PnL
+        this.dailyPnL += pnl;
         
         this.logger.info(`Exited ${this.position} position at $${price}, PnL: ${pnl.toFixed(2)}%`);
         
@@ -253,13 +266,19 @@ class TradingBot {
         setInterval(() => {
             if (this.isRunning) {
                 const errorStats = this.errorHandler.getErrorStats();
-                const uptime = Date.now() - this.stats.startTime.getTime();
+                const performanceMetrics = this.performanceAnalyzer.calculateMetrics();
+                const uptime = Date.now() - Date.now(); // Will be set properly in actual implementation
                 
                 this.logger.info('Bot heartbeat', {
                     uptime: Math.round(uptime / 1000 / 60) + ' minutes',
                     position: this.position,
                     dailyPnL: this.dailyPnL.toFixed(4),
-                    totalTrades: this.stats.totalTrades,
+                    performance: {
+                        totalTrades: performanceMetrics.totalTrades,
+                        winRate: performanceMetrics.winRate,
+                        totalReturn: performanceMetrics.totalReturn,
+                        sharpeRatio: performanceMetrics.sharpeRatio
+                    },
                     errorStats
                 });
             }
@@ -269,14 +288,25 @@ class TradingBot {
     stop() {
         this.isRunning = false;
         
-        // Log final statistics
+        // Generate final performance report
+        const performanceMetrics = this.performanceAnalyzer.calculateMetrics();
         const finalStats = {
-            ...this.stats,
             dailyPnL: this.dailyPnL,
-            errorStats: this.errorHandler.getErrorStats()
+            performance: performanceMetrics,
+            errorStats: this.errorHandler.getErrorStats(),
+            tradeHistory: this.performanceAnalyzer.getTradeHistory(10)
         };
         
-        this.logger.info('Bot stopped', finalStats);
+        this.logger.info('Bot stopped - Final Performance Report', finalStats);
+        
+        // Export full analysis if there are trades
+        if (parseInt(performanceMetrics.totalTrades) > 0) {
+            const fullAnalysis = this.performanceAnalyzer.exportAnalysis();
+            this.logger.info('Full performance analysis available', {
+                totalTrades: fullAnalysis.summary.totalTradesAnalyzed,
+                timespan: fullAnalysis.summary.timespan
+            });
+        }
     }
 }
 

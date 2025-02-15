@@ -4,3 +4,5 @@ node_modules/
 .env
 logs/
 *.log
+backtest_results_*.json
+config.json
